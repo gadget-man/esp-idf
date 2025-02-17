@@ -1,132 +1,193 @@
-# Espressif IoT Development Framework
+| Supported Targets | ESP32-P4 | ESP32-S2 | ESP32-S3 |
+| ----------------- | -------- | -------- | -------- |
 
-* [中文版](./README_CN.md)
+# USB Host Library Example
 
-ESP-IDF is the development framework for Espressif SoCs supported on Windows, Linux and macOS.
+(See the README.md file in the upper level 'examples' directory for more information about examples.)
 
-# ESP-IDF Release Support Schedule
+This example demonstrates the basic usage of the [USB Host Library API](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/peripherals/usb_host.html) by implementing a pseudo class driver and a Host Library task. The example does the following:
 
-![Support Schedule](https://dl.espressif.com/dl/esp-idf/support-periods.svg?v=1)
+1. Install Host Library and register a client
+2. Waits for a device connection
+3. Prints the device's information (such as device/configuration/string descriptors)
+4. Waits for the device to disconnect
+5. Repeats steps 2 to 4 until a user pressess a button, which quits the `app`
+6. If the button has been pressed, while a USB device is still connected, the user will be prompted to remove the device and push the button again to quit the `app`
+7. Deregister the client, uninstall the Host Library and quit the `app`
 
-- Please read [the support policy](SUPPORT_POLICY.md) and [the documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/versions.html) for more information about ESP-IDF versions.
-- Please see the [End-of-Life Advisories](https://www.espressif.com/en/support/documents/advisories?keys=&field_type_of_advisory_tid%5B%5D=817) for information about ESP-IDF releases with discontinued support.
+The example demonstrates the following aspects of the USB Host Library API:
 
-# ESP-IDF Release and SoC Compatibility
+- How to use the Library API to:
+    - Install and uninstall the USB Host Library
+    - Run the library event handler function and usb host library task
+    - How to handle library events
+- How to use the Client API from a client task to:
+    - Register and deregister a client of the USB Host Library
+    - Run the client event handler functions
+    - How to handle client events via various callbacks
+    - Open and close a device
+    - Get a device's descriptors
 
-The following table shows ESP-IDF support of Espressif SoCs where ![alt text][preview] and ![alt text][supported] denote preview status and support, respectively. The preview support is usually limited in time and intended for beta versions of chips. Please use an ESP-IDF release where the desired SoC is already supported.
+## How to use example
 
-|Chip         |          v5.0          |         v5.1           |         v5.2           |         v5.3           |          v5.4           |                                                                     |
-|:----------- | :---------------------:| :--------------------: | :--------------------: | :--------------------: |  :--------------------: |:------------------------------------------------------------------- |
-|ESP32        | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] |  ![alt text][supported] |                                                                     |
-|ESP32-S2     | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] |  ![alt text][supported] |                                                                     |
-|ESP32-C3     | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] |  ![alt text][supported] |                                                                     |
-|ESP32-S3     | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] |  ![alt text][supported] |[Announcement](https://www.espressif.com/en/news/ESP32_S3)           |
-|ESP32-C2     | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] |  ![alt text][supported] |[Announcement](https://www.espressif.com/en/news/ESP32-C2)           |
-|ESP32-C6     |                        | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] |  ![alt text][supported] |[Announcement](https://www.espressif.com/en/news/ESP32_C6)           |
-|ESP32-H2     |                        | ![alt text][supported] | ![alt text][supported] | ![alt text][supported] |  ![alt text][supported] |[Announcement](https://www.espressif.com/en/news/ESP32_H2)           |
-|ESP32-P4     |                        |                        |                        | ![alt text][supported] |  ![alt text][supported] |[Announcement](https://www.espressif.com/en/news/ESP32-P4)           |
-|ESP32-C5     |                        |                        |                        |                        |  ![alt text][preview]   |[Announcement](https://www.espressif.com/en/news/ESP32-C5)           |
-|ESP32-C61    |                        |                        |                        |                        |  ![alt text][preview]   |[Announcement](https://www.espressif.com/en/products/socs/esp32-c61) |
+### Hardware Required
 
-[supported]: https://img.shields.io/badge/-supported-green "supported"
-[preview]: https://img.shields.io/badge/-preview-orange "preview"
+* Development board with USB-OTG support.
+* Follow instruction in [examples/usb/README.md](../../README.md) for specific hardware setup.
 
-There are variants of revisions for a series of chips. See [Compatibility Between ESP-IDF Releases and Revisions of Espressif SoCs](https://github.com/espressif/esp-idf/blob/master/COMPATIBILITY.md) for the details of the compatibility between ESP-IDF and chip revisions.
+### Configure the project
 
-Espressif SoCs released before 2016 (ESP8266 and ESP8285) are supported by [RTOS SDK](https://github.com/espressif/ESP8266_RTOS_SDK) instead.
+```
+idf.py menuconfig
+```
 
-# Developing With ESP-IDF
+* The USB Host Stack has a maximum supported transfer size for control transfer during device enumeration. This size is specified via the USB_HOST_CONTROL_TRANSFER_MAX_SIZE configuration option and has a default value of 256 bytes. Therefore, if devices with length config/string descriptors are used, users may want to increase the size of this configuration.
+* Push button GPIO selection
 
-## Setting Up ESP-IDF
+### Build and Flash
 
-See https://idf.espressif.com/ for links to detailed instructions on how to set up the ESP-IDF depending on chip you use.
+Build the project and flash it to the board, then run monitor tool to view serial output:
 
-**Note:** Each SoC series and each ESP-IDF release has its own documentation. Please see Section [Versions](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/versions.html) on how to find documentation and how to checkout specific release of ESP-IDF.
+```
+idf.py -p PORT flash monitor
+```
 
-### Non-GitHub forks
+(Replace PORT with the name of the serial port to use.)
 
-ESP-IDF uses relative locations as its submodules URLs ([.gitmodules](.gitmodules)). So they link to GitHub. If ESP-IDF is forked to a Git repository which is not on GitHub, you will need to run the script [tools/set-submodules-to-github.sh](tools/set-submodules-to-github.sh) after git clone.
+(To exit the serial monitor, type ``Ctrl-]``.)
 
-The script sets absolute URLs for all submodules, allowing `git submodule update --init --recursive` to complete. If cloning ESP-IDF from GitHub, this step is not needed.
+See the Getting Started Guide for full steps to configure and use ESP-IDF to build projects.
 
-## Finding a Project
+## Example Output
 
-As well as the [esp-idf-template](https://github.com/espressif/esp-idf-template) project mentioned in Getting Started, ESP-IDF comes with some example projects in the [examples](examples) directory.
+```
+I (305) main_task: Started on CPU0
+I (315) main_task: Calling app_main()
+I (315) USB host lib: USB host library example
+I (315) gpio: GPIO[0]| InputEn: 1| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:2 
+I (325) USB host lib: Installing USB Host Library
+I (365) CLASS: Registering Client
+I (745) CLASS: Opening device at address 1
+I (745) CLASS: Getting device information
+I (745) CLASS: 	Full speed
+I (745) CLASS: 	bConfigurationValue 1
+I (745) CLASS: Getting device descriptor
+*** Device descriptor ***
+bLength 18
+bDescriptorType 1
+bcdUSB 2.00
+bDeviceClass 0xef
+bDeviceSubClass 0x2
+bDeviceProtocol 0x1
+bMaxPacketSize0 64
+idVendor 0x303a
+idProduct 0x1001
+bcdDevice 1.00
+iManufacturer 1
+iProduct 2
+iSerialNumber 3
+bNumConfigurations 1
+I (775) CLASS: Getting config descriptor
+*** Configuration descriptor ***
+bLength 9
+bDescriptorType 2
+wTotalLength 98
+bNumInterfaces 3
+bConfigurationValue 1
+iConfiguration 0
+bmAttributes 0xc0
+bMaxPower 500mA
+	*** Interface descriptor ***
+	bLength 9
+	bDescriptorType 4
+	bInterfaceNumber 0
+	bAlternateSetting 0
+	bNumEndpoints 1
+	bInterfaceClass 0x0
+	iInterface 0
+		*** Endpoint descriptor ***
+		bLength 7
+		bDescriptorType 5
+		bEndpointAddress 0x82	EP 2 IN
+		bmAttributes 0x3	INT
+		wMaxPacketSize 64
+		bInterval 1
+	*** Interface descriptor ***
+	bLength 9
+	bDescriptorType 4
+	bInterfaceNumber 1
+	bAlternateSetting 0
+	bNumEndpoints 2
+	bInterfaceClass 0x0
+	iInterface 0
+		*** Endpoint descriptor ***
+		bLength 7
+		bDescriptorType 5
+		bEndpointAddress 0x1	EP 1 OUT
+		bmAttributes 0x2	BULK
+		wMaxPacketSize 64
+		bInterval 1
+		*** Endpoint descriptor ***
+		bLength 7
+		bDescriptorType 5
+		bEndpointAddress 0x81	EP 1 IN
+		bmAttributes 0x2	BULK
+		wMaxPacketSize 64
+		bInterval 1
+	*** Interface descriptor ***
+	bLength 9
+	bDescriptorType 4
+	bInterfaceNumber 2
+	bAlternateSetting 0
+	bNumEndpoints 2
+	bInterfaceClass 0x1
+	iInterface 0
+		*** Endpoint descriptor ***
+		bLength 7
+		bDescriptorType 5
+		bEndpointAddress 0x2	EP 2 OUT
+		bmAttributes 0x2	BULK
+		wMaxPacketSize 64
+		bInterval 1
+		*** Endpoint descriptor ***
+		bLength 7
+		bDescriptorType 5
+		bEndpointAddress 0x83	EP 3 IN
+		bmAttributes 0x2	BULK
+		wMaxPacketSize 64
+		bInterval 1
+I (855) CLASS: Getting Manufacturer string descriptor
+Espressif
+I (855) CLASS: Getting Product string descriptor
+USB JTAG/serial debug unit
+I (865) CLASS: Getting Serial Number string descriptor
+7C:DF:A1:E0:10:50
+W (2855) USB host lib: To shutdown example, remove all USB devices and press button again.
+E (6135) USBH: Device 1 gone
+I (9545) CLASS: Deregistering Client
+I (9545) USB host lib: No more clients
+I (9545) USB host lib: All devices marked as free
+I (9545) USB host lib: No more clients and devices
+I (9645) USB host lib: End of the example
+I (9645) main_task: Returned from app_main()
+```
 
-Once you've found the project you want to work with, change to its directory and you can configure and build it.
+## Troubleshooting
 
-To start your own project based on an example, copy the example project directory outside of the ESP-IDF directory.
+To obtain more debug, users should set the [log level](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/system/log.html) to debug via menuconfig.
 
-# Quick Reference
+### Failing Enumeration
 
-See the Getting Started guide links above for a detailed setup guide. This is a quick reference for common commands when working with ESP-IDF projects:
+```
+I (262) cpu_start: Starting scheduler on PRO CPU.
+I (268) DAEMON: Installing USB Host Library
+I (298) CLASS: Registering Client
+E (2748) HUB: Short string desc corrupt
+E (2748) HUB: Stage failed: CHECK_SHORT_MANU_STR_DESC
+```
 
-## Setup Build Environment
+The log output demonstrates a device that has failed. The Hub Driver will output some error logs indicating which stage of enumeration has failed.
 
-(See the Getting Started guide listed above for a full list of required steps with more details.)
+### Blank String Descriptors
 
-* Install host build dependencies mentioned in the Getting Started guide.
-* Run the install script to set up the build environment. The options include `install.bat` or `install.ps1` for Windows, and `install.sh` or `install.fish` for Unix shells.
-* Run the export script on Windows (`export.bat`) or source it on Unix (`source export.sh`) in every shell environment before using ESP-IDF.
-
-## Configuring the Project
-
-* `idf.py set-target <chip_name>` sets the target of the project to `<chip_name>`. Run `idf.py set-target` without any arguments to see a list of supported targets.
-* `idf.py menuconfig` opens a text-based configuration menu where you can configure the project.
-
-## Compiling the Project
-
-`idf.py build`
-
-... will compile app, bootloader and generate a partition table based on the config.
-
-## Flashing the Project
-
-When the build finishes, it will print a command line to use esptool.py to flash the chip. However you can also do this automatically by running:
-
-`idf.py -p PORT flash`
-
-Replace PORT with the name of your serial port (like `COM3` on Windows, `/dev/ttyUSB0` on Linux, or `/dev/cu.usbserial-X` on MacOS. If the `-p` option is left out, `idf.py flash` will try to flash the first available serial port.
-
-This will flash the entire project (app, bootloader and partition table) to a new chip. The settings for serial port flashing can be configured with `idf.py menuconfig`.
-
-You don't need to run `idf.py build` before running `idf.py flash`, `idf.py flash` will automatically rebuild anything which needs it.
-
-## Viewing Serial Output
-
-The `idf.py monitor` target uses the [esp-idf-monitor tool](https://github.com/espressif/esp-idf-monitor) to display serial output from Espressif SoCs. esp-idf-monitor also has a range of features to decode crash output and interact with the device. [Check the documentation page for details](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/idf-monitor.html).
-
-Exit the monitor by typing Ctrl-].
-
-To build, flash and monitor output in one pass, you can run:
-
-`idf.py flash monitor`
-
-## Compiling & Flashing Only the App
-
-After the initial flash, you may just want to build and flash just your app, not the bootloader and partition table:
-
-* `idf.py app` - build just the app.
-* `idf.py app-flash` - flash just the app.
-
-`idf.py app-flash` will automatically rebuild the app if any source files have changed.
-
-(In normal development there's no downside to reflashing the bootloader and partition table each time, if they haven't changed.)
-
-## Erasing Flash
-
-The `idf.py flash` target does not erase the entire flash contents. However it is sometimes useful to set the device back to a totally erased state, particularly when making partition table changes or OTA app updates. To erase the entire flash, run `idf.py erase-flash`.
-
-This can be combined with other targets, ie `idf.py -p PORT erase-flash flash` will erase everything and then re-flash the new app, bootloader and partition table.
-
-# Resources
-
-* Documentation for the latest version: https://docs.espressif.com/projects/esp-idf/. This documentation is built from the [docs directory](docs) of this repository.
-
-* [Beginner's Guide to Key Concepts and Resources of ESP-IDF](https://youtu.be/J8zc8mMNKtc?feature=shared)
-
-* The [esp32.com forum](https://esp32.com/) is a place to ask questions and find community resources.
-
-* [Check the Issues section on github](https://github.com/espressif/esp-idf/issues) if you find a bug or have a feature request. Please check existing Issues before opening a new one.
-
-* If you're interested in contributing to ESP-IDF, please check the [Contributions Guide](https://docs.espressif.com/projects/esp-idf/en/latest/contribute/index.html).
+The current USB Host Library will automatically cache the Manufacturer, Product, and Serial Number string descriptors of the device during enumeration. However, when fetching the string descriptors, the USB Host Library will only fetch those strings descriptors of they of LANGID code 0x0409 (i.e., English - United States). Therefore, if the example does not print a particular descriptor, it is likely that the string descriptor was not cached during enumeration.
