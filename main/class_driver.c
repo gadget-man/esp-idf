@@ -13,6 +13,8 @@
 
 #define CLIENT_NUM_EVENT_MSG 5
 
+usb_device_handle_t usb_dev = NULL;
+
 typedef enum
 {
     ACTION_OPEN_DEV = (1 << 0),
@@ -26,7 +28,7 @@ typedef enum
     ACTION_CLOSE_DEV = (1 << 5),
 } action_t;
 
-#define DEV_MAX_COUNT 128
+#define DEV_MAX_COUNT 6
 
 typedef struct
 {
@@ -164,9 +166,14 @@ static void action_get_dev_desc(usb_device_t *device_obj)
     // Get the device's config descriptor next
     uint16_t vendor_id = dev_desc->idVendor;
     uint16_t product_id = dev_desc->idProduct;
+
     if (vendor_id == 0x0BDA && product_id == 0x8152)
     {
-        ESP_LOGI(TAG, "Realtek RTL8152/RTL8153 detected!");
+        usb_device_info_t dev_info;
+        ESP_ERROR_CHECK(usb_host_device_info(device_obj->dev_hdl, &dev_info));
+        ESP_LOGI(TAG, "Realtek RTL8152/RTL8153 detected");
+        // ESP_LOGI(TAG, "Serial Number: %s", dev_info.str_desc_serial_num);
+        usb_print_string_descriptor(dev_info.str_desc_serial_num);
         device_obj->actions |= ACTION_CLAIM_INTERFACE;
     }
     else
@@ -267,6 +274,8 @@ static void action_transfer(usb_device_t *device_obj)
         rx_xfer->callback = usb_rx_callback;
         rx_xfer->context = (void *)&device_obj;
         usb_host_transfer_submit(rx_xfer);
+
+        usb_dev = device_obj->dev_hdl;
     }
     else
     {
@@ -329,33 +338,37 @@ void usb_rx_callback(usb_transfer_t *rx_xfer)
         // Process Ethernet packet (example: print first few bytes)
         ESP_LOG_BUFFER_HEX(TAG, rx_xfer->data_buffer, rx_xfer->actual_num_bytes < 16 ? rx_xfer->actual_num_bytes : 16);
     }
+    else
+    {
+        ESP_LOGI(TAG, "Transfer failed, status: %d", rx_xfer->status);
+    }
     // Re-submit transfer
     usb_host_transfer_submit(rx_xfer);
 }
 
-// // // USB Send Packet Function
-// void send_ethernet_packet(uint8_t *packet, size_t len)
-// {
-//     if (!bulk_out_ep)
-//     {
-//         ESP_LOGE(TAG, "Device not ready");
-//         return;
-//     }
+// // USB Send Packet Function
+void usb_eth_transmit(uint8_t *packet, size_t len)
+{
+    if (!bulk_out_ep)
+    {
+        ESP_LOGE(TAG, "Device not ready");
+        return;
+    }
 
-//     if (usb_host_transfer_alloc(len, 0, &tx_xfer) != ESP_OK)
-//     {
-//         ESP_LOGE(TAG, "Failed to allocate USB transfer!");
-//         return;
-//     }
-//     memcpy(tx_xfer->data_buffer, packet, len);
-//     tx_xfer->device_handle = s_driver_obj->constant.dev_hdl;
-//     tx_xfer->bEndpointAddress = bulk_out_ep;
-//     tx_xfer->num_bytes = len;
-//     tx_xfer->callback = NULL; // No callback needed for sending
-//     usb_host_transfer_submit(tx_xfer);
+    if (usb_host_transfer_alloc(len, 0, &tx_xfer) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to allocate USB transfer!");
+        return;
+    }
+    memcpy(tx_xfer->data_buffer, packet, len);
+    // tx_xfer->device_handle = s_driver_obj->constant.dev_hdl; //TODO: add this.
+    tx_xfer->bEndpointAddress = bulk_out_ep;
+    tx_xfer->num_bytes = len;
+    tx_xfer->callback = NULL; // No callback needed for sending
+    usb_host_transfer_submit(tx_xfer);
 
-//     ESP_LOGI(TAG, "Sent %d bytes", len);
-// }
+    ESP_LOGI(TAG, "Sent %d bytes", len);
+}
 
 static void class_driver_device_handle(usb_device_t *device_obj)
 {
