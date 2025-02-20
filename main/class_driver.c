@@ -9,11 +9,17 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_eth.h"
+#include "esp_netif.h"
 #include "usb/usb_host.h"
+
+#include "class_driver.h"
 
 #define CLIENT_NUM_EVENT_MSG 5
 
 usb_device_handle_t usb_dev = NULL;
+
+extern esp_netif_t *usb_netif;
 
 typedef enum
 {
@@ -75,7 +81,7 @@ uint8_t bulk_out_ep = 0;
 #define PACKET_SIZE 64
 uint8_t rx_buffer[PACKET_SIZE];
 
-void usb_rx_callback(usb_transfer_t *rx_xfer);
+static void usb_rx_callback(usb_transfer_t *rx_xfer);
 
 static void client_event_cb(const usb_host_client_event_msg_t *event_msg, void *arg)
 {
@@ -263,6 +269,9 @@ static void action_transfer(usb_device_t *device_obj)
 
     if (bulk_in_ep && bulk_out_ep)
     {
+        // usb_eth_mac_t *usb_mac = (usb_eth_mac_t *)esp_eth_mac_new_usb(device_obj->dev_hdl);
+        usb_dev = device_obj->dev_hdl;
+
         if (usb_host_transfer_alloc(PACKET_SIZE, 0, &rx_xfer) != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to allocate USB transfer!");
@@ -274,8 +283,6 @@ static void action_transfer(usb_device_t *device_obj)
         rx_xfer->callback = usb_rx_callback;
         rx_xfer->context = (void *)&device_obj;
         usb_host_transfer_submit(rx_xfer);
-
-        usb_dev = device_obj->dev_hdl;
     }
     else
     {
@@ -329,25 +336,117 @@ static void action_close_dev(usb_device_t *device_obj)
     ESP_LOGI(TAG, "Device closed");
 }
 
-// USB Receive Callback
-void usb_rx_callback(usb_transfer_t *rx_xfer)
+static void usb_rx_callback(usb_transfer_t *transfer)
 {
-    if (rx_xfer->status == USB_TRANSFER_STATUS_COMPLETED)
+    usb_eth_mac_t *mac = (usb_eth_mac_t *)transfer->context;
+
+    ESP_LOGI("USB_ETH", "Received packet: %d bytes", transfer->actual_num_bytes);
+
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0)
     {
-        ESP_LOGI(TAG, "Received %d bytes", rx_xfer->actual_num_bytes);
-        // Process Ethernet packet (example: print first few bytes)
-        ESP_LOG_BUFFER_HEX(TAG, rx_xfer->data_buffer, rx_xfer->actual_num_bytes < 16 ? rx_xfer->actual_num_bytes : 16);
+        ESP_LOGI("USB_ETH", "Received packet: %d bytes", transfer->actual_num_bytes);
+
+        esp_netif_receive(usb_netif, transfer->data_buffer, transfer->actual_num_bytes, NULL);
+
+        // if (mac->parent.stack_input)
+        // {
+        //     mac->parent.stack_input(&mac->parent, transfer->data_buffer, transfer->actual_num_bytes);
+        // }
+        // else
+        // {
+        //     ESP_LOGE(TAG, "MAC mediator is not set, cannot pass data to Ethernet stack");
+        // }
     }
     else
     {
-        ESP_LOGI(TAG, "Transfer failed, status: %d", rx_xfer->status);
+        ESP_LOGW("USB_ETH", "USB RX failed or no data: %d", transfer->status);
     }
-    // Re-submit transfer
-    usb_host_transfer_submit(rx_xfer);
+
+    // Re-submit RX transfer for next packet
+    transfer->num_bytes = PACKET_SIZE;
+    usb_host_transfer_submit(transfer);
 }
 
-// // USB Send Packet Function
-void usb_eth_transmit(uint8_t *packet, size_t len)
+// USB transfer callback.
+static void usb_tx_callback(usb_transfer_t *transfer)
+{
+    // usb_eth_mac_t *mac = (usb_eth_mac_t *)transfer->context;
+
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED)
+    {
+        ESP_LOGI("USB_ETH", "Packet transmitted: %d bytes", transfer->actual_num_bytes);
+    }
+    else
+    {
+        ESP_LOGW("USB_ETH", "USB TX failed: %d", transfer->status);
+    }
+
+    // Free allocated transfer to prevent memory leaks
+    // usb_host_transfer_free(transfer); //TODO: check if this needs to be freed after every transmit or only when closing.
+}
+
+// Send a packet over USB
+// esp_err_t usb_eth_transmit(esp_eth_mac_t *mac, uint8_t *buf, uint32_t length)
+// {
+//     usb_eth_mac_t *usb_mac = __containerof(mac, usb_eth_mac_t, parent);
+
+//     if (!usb_dev || !bulk_out_ep)
+//     {
+//         ESP_LOGE(TAG, "USB device not initialized or bulk OUT endpoint missing");
+//         return ESP_FAIL;
+//     }
+//     // usb_transfer_t *tx_xfer = NULL;
+//     if (usb_host_transfer_alloc(length, 0, &tx_xfer) != ESP_OK)
+//     {
+//         ESP_LOGE("USB_ETH", "Failed to allocate USB transfer");
+//         return ESP_FAIL;
+//     }
+
+//     memcpy(tx_xfer->data_buffer, buf, length);
+//     tx_xfer->num_bytes = length;
+//     tx_xfer->device_handle = usb_dev;
+//     tx_xfer->bEndpointAddress = bulk_out_ep;
+//     tx_xfer->callback = usb_tx_callback; // Callback to handle completion
+//     tx_xfer->context = usb_mac;
+
+//     esp_err_t ret = usb_host_transfer_submit(tx_xfer);
+//     if (ret != ESP_OK)
+//     {
+//         ESP_LOGE("USB_ETH", "Failed to submit USB transfer");
+//         // usb_host_transfer_free(tx_xfer);
+//     }
+
+//     return ret;
+// }
+
+esp_err_t usb_eth_receive(esp_eth_mac_t *mac, uint8_t *buf, uint32_t *length)
+{
+    usb_eth_mac_t *usb_mac = __containerof(mac, usb_eth_mac_t, parent);
+
+    if (!usb_dev || !bulk_in_ep)
+    {
+        ESP_LOGE("USB_ETH", "USB device not initialized or bulk IN endpoint missing");
+        return ESP_FAIL;
+    }
+
+    // usb_transfer_t *rx_xfer = NULL;
+    if (usb_host_transfer_alloc(PACKET_SIZE, 0, &rx_xfer) != ESP_OK)
+    {
+        ESP_LOGE("USB_ETH", "Failed to allocate USB transfer");
+        return ESP_FAIL;
+    }
+
+    rx_xfer->num_bytes = PACKET_SIZE;
+    rx_xfer->device_handle = usb_dev;
+    rx_xfer->bEndpointAddress = bulk_in_ep;
+    rx_xfer->callback = usb_rx_callback; // Callback for RX completion
+    rx_xfer->context = usb_mac;
+
+    return usb_host_transfer_submit(rx_xfer);
+}
+
+// // // USB Send Packet Function
+void usb_transmit(uint8_t *packet, size_t len)
 {
     if (!bulk_out_ep)
     {
