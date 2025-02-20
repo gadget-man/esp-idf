@@ -18,6 +18,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "lwip/init.h"
+#include "lwip/ip_addr.h"
 
 #include "class_driver.h"
 
@@ -66,7 +67,7 @@ typedef struct
     uint8_t mac_addr[6];
 } usb_eth_driver_t;
 
-usb_eth_driver_t *usb_driver = NULL; // PMN HERE add Base definition e.g. transfer, mac address.
+usb_eth_driver_t *usb_driver = NULL;
 
 /**
  * @brief APP event queue
@@ -112,28 +113,51 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
     /* we can get the ethernet driver handle from event data */
     esp_eth_handle_t eth_handle = *(esp_eth_handle_t *)event_data;
 
-    switch (event_id)
+    if (event_base == ETH_EVENT)
     {
-    case ETHERNET_EVENT_CONNECTED:
-        esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
-        ESP_LOGI(TAG, "Ethernet Link Up");
-        ESP_LOGI(TAG, "Ethernet HW Addr %02x:%02x:%02x:%02x:%02x:%02x",
-                 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-        break;
-    case ETHERNET_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "Ethernet Link Down");
-        break;
-    case ETHERNET_EVENT_START:
-        ESP_LOGI(TAG, "Ethernet Started");
-        break;
-    case ETHERNET_EVENT_STOP:
-        ESP_LOGI(TAG, "Ethernet Stopped");
-        break;
-    case IP_EVENT_ETH_GOT_IP:
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-    default:
-        break;
+        switch (event_id)
+        {
+        case ETHERNET_EVENT_CONNECTED:
+            esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
+            ESP_LOGI(TAG, "Ethernet Link Up");
+            ESP_LOGI(TAG, "Ethernet HW Addr %02x:%02x:%02x:%02x:%02x:%02x",
+                     mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+            break;
+        case ETHERNET_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "Ethernet Link Down");
+            break;
+        case ETHERNET_EVENT_START:
+            ESP_LOGI(TAG, "Ethernet Started");
+            break;
+        case ETHERNET_EVENT_STOP:
+            ESP_LOGI(TAG, "Ethernet Stopped");
+            break;
+        default:
+            ESP_LOGI(TAG, "Unhandled Ethernet Event: %ld", event_id);
+            break;
+        }
+    }
+    else if (event_base == IP_EVENT)
+    {
+        switch (event_id)
+        {
+        case IP_EVENT_ETH_GOT_IP:
+        {
+            ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+            ESP_LOGI(TAG, "Ethernet got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+            ESP_LOGI(TAG, "Subnet Mask: " IPSTR, IP2STR(&event->ip_info.netmask));
+            ESP_LOGI(TAG, "Gateway: " IPSTR, IP2STR(&event->ip_info.gw));
+            break;
+        }
+
+        case IP_EVENT_ETH_LOST_IP:
+            ESP_LOGI(TAG, "Ethernet lost IP address");
+            break;
+
+        default:
+            ESP_LOGW(TAG, "Unhandled IP Event: %ld", event_id);
+            break;
+        }
     }
 }
 
@@ -238,23 +262,23 @@ esp_err_t usb_eth_mac_stop(esp_eth_mac_t *mac)
 }
 
 // Define MAC driver
-esp_eth_mac_t *esp_eth_mac_new_usb(usb_device_handle_t usb_dev)
-{
-    usb_eth_mac_t *mac = calloc(1, sizeof(usb_eth_mac_t));
+// esp_eth_mac_t *esp_eth_mac_new_usb(usb_device_handle_t usb_dev)
+// {
+//     usb_eth_mac_t *mac = calloc(1, sizeof(usb_eth_mac_t));
 
-    // Set the MAC address (use a valid address or one you define)
-    uint8_t mac_addr[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55}; // Example MAC address
-    memcpy(mac->mac_addr, mac_addr, 6);
+//     // Set the MAC address (use a valid address or one you define)
+//     uint8_t mac_addr[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55}; // Example MAC address
+//     memcpy(mac->mac_addr, mac_addr, 6);
 
-    mac->parent.get_addr = usb_eth_get_addr;
-    mac->parent.start = usb_eth_start;
-    // mac->parent.transmit = usb_eth_transmit;
-    // mac->parent.receive = usb_eth_receive;
-    mac->parent.del = usb_eth_mac_del;
-    mac->parent.stop = usb_eth_mac_stop;
-    mac->usb_dev = usb_dev;
-    return &(mac->parent);
-}
+//     mac->parent.get_addr = usb_eth_get_addr;
+//     mac->parent.start = usb_eth_start;
+//     // mac->parent.transmit = usb_eth_transmit;
+//     // mac->parent.receive = usb_eth_receive;
+//     mac->parent.del = usb_eth_mac_del;
+//     mac->parent.stop = usb_eth_mac_stop;
+//     mac->usb_dev = usb_dev;
+//     return &(mac->parent);
+// }
 
 esp_err_t my_stack_input_function(void *arg, uint8_t *data, uint32_t length, void *ctx)
 {
@@ -267,6 +291,7 @@ esp_err_t my_stack_input_function(void *arg, uint8_t *data, uint32_t length, voi
 
 esp_err_t usb_eth_transmit(void *h, void *buffer, size_t len)
 {
+    ESP_LOGI(TAG, "Transmitting packet");
     // Send the Ethernet frame over USB
     usb_eth_driver_t *driver = (usb_eth_driver_t *)h;
     if (!driver->link_up)
@@ -283,6 +308,28 @@ esp_err_t usb_eth_transmit(void *h, void *buffer, size_t len)
     return ESP_OK;
 }
 
+// Function to be called after attaching the netif
+static esp_err_t usb_eth_post_attach(esp_netif_t *netif, void *args)
+{
+    usb_eth_driver_t *driver = (usb_eth_driver_t *)args;
+    if (!driver || !netif)
+    {
+        ESP_LOGE(TAG, "Invalid driver or netif in post_attach");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Post attach: Linking network interface with driver");
+
+    // Store netif handle in driver
+    // driver->netif = netif;
+
+    // Optional: Set up additional event handlers
+    esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+    esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+
+    return ESP_OK;
+}
+
 void create_usb_netif()
 {
     esp_netif_init();
@@ -291,13 +338,6 @@ void create_usb_netif()
     usb_driver = calloc(1, sizeof(usb_eth_driver_t));
     // usb_driver->base.post_attach = NULL; // Optional callback
     usb_driver->link_up = true; // Assume link is up initially
-    usb_driver->base.transmit = usb_eth_transmit;
-
-    esp_netif_driver_ifconfig_t driver_config = {
-        .handle = usb_driver,
-        .transmit = usb_eth_transmit,
-        .driver_free_rx_buffer = NULL, // Not needed for USB
-    };
 
     esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
     usb_netif = esp_netif_new(&netif_config);
@@ -307,13 +347,32 @@ void create_usb_netif()
     esp_read_mac(mac, ESP_MAC_ETH);
     esp_netif_set_mac(usb_netif, mac);
     memcpy(usb_driver->mac_addr, mac, 6);
-    memcpy(usb_driver->base.mac_addr, mac, 6);
     ESP_LOGI(TAG, "Set MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    esp_netif_set_driver_config(usb_netif, &driver_config);
+    esp_netif_driver_ifconfig_t driver_config = {
+        .handle = usb_driver,
+        .transmit = usb_eth_transmit,
+        .driver_free_rx_buffer = NULL, // Not needed for USB
+        // .post_attach = usb_eth_post_attach,
+    };
 
-    esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, ip_event_handler, NULL);
+    // esp_netif_set_driver_config(usb_netif, &driver_config);
+
+    if (esp_netif_set_driver_config(usb_netif, &driver_config) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set driver config");
+    }
+    // Cast to esp_netif_iodriver_handle_t and attach
+    if (esp_netif_attach(usb_netif, (esp_netif_iodriver_handle)usb_driver) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to attach netif");
+    }
+
+    esp_netif_attach(usb_netif, usb_driver);
+
+    esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+    esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
 
     // esp_netif_glue_t glue = driver_glue(usb_driver);
 
@@ -601,7 +660,7 @@ void app_main(void)
     }
     set_link_status(true);
 
-    test_transmit();
+    // test_transmit();
 
     while (1)
     {

@@ -82,6 +82,7 @@ uint8_t bulk_out_ep = 0;
 uint8_t rx_buffer[PACKET_SIZE];
 
 static void usb_rx_callback(usb_transfer_t *rx_xfer);
+static void usb_tx_callback(usb_transfer_t *tx_xfer);
 
 static void client_event_cb(const usb_host_client_event_msg_t *event_msg, void *arg)
 {
@@ -272,17 +273,18 @@ static void action_transfer(usb_device_t *device_obj)
         // usb_eth_mac_t *usb_mac = (usb_eth_mac_t *)esp_eth_mac_new_usb(device_obj->dev_hdl);
         usb_dev = device_obj->dev_hdl;
 
-        if (usb_host_transfer_alloc(PACKET_SIZE, 0, &rx_xfer) != ESP_OK)
+        if (usb_host_transfer_alloc(PACKET_SIZE, 0, &tx_xfer) != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to allocate USB transfer!");
             return;
         }
-        rx_xfer->num_bytes = PACKET_SIZE;
-        rx_xfer->device_handle = device_obj->dev_hdl;
-        rx_xfer->bEndpointAddress = bulk_in_ep;
-        rx_xfer->callback = usb_rx_callback;
-        rx_xfer->context = (void *)&device_obj;
-        usb_host_transfer_submit(rx_xfer);
+        memset(tx_xfer->data_buffer, 0xAA, PACKET_SIZE);
+        tx_xfer->num_bytes = PACKET_SIZE;
+        tx_xfer->device_handle = device_obj->dev_hdl;
+        tx_xfer->bEndpointAddress = bulk_out_ep;
+        tx_xfer->callback = usb_tx_callback;
+        tx_xfer->context = (void *)&device_obj;
+        usb_host_transfer_submit(tx_xfer);
     }
     else
     {
@@ -368,17 +370,21 @@ static void usb_rx_callback(usb_transfer_t *transfer)
 }
 
 // USB transfer callback.
-static void usb_tx_callback(usb_transfer_t *transfer)
+static void usb_tx_callback(usb_transfer_t *tx_xfer)
 {
+    class_driver_t *driver_obj = (class_driver_t *)tx_xfer->context;
+
+    ESP_LOGI(TAG, "Transfer status %d, actual number of bytes transferred %d", tx_xfer->status, tx_xfer->actual_num_bytes);
+
     // usb_eth_mac_t *mac = (usb_eth_mac_t *)transfer->context;
 
-    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED)
+    if (tx_xfer->status == USB_TRANSFER_STATUS_COMPLETED)
     {
-        ESP_LOGI("USB_ETH", "Packet transmitted: %d bytes", transfer->actual_num_bytes);
+        ESP_LOGI("USB_ETH", "Packet transmitted: %d bytes", tx_xfer->actual_num_bytes);
     }
     else
     {
-        ESP_LOGW("USB_ETH", "USB TX failed: %d", transfer->status);
+        ESP_LOGW("USB_ETH", "USB TX failed: %d", tx_xfer->status);
     }
 
     // Free allocated transfer to prevent memory leaks
@@ -460,10 +466,10 @@ void usb_transmit(uint8_t *packet, size_t len)
         return;
     }
     memcpy(tx_xfer->data_buffer, packet, len);
-    // tx_xfer->device_handle = s_driver_obj->constant.dev_hdl; //TODO: add this.
+    tx_xfer->device_handle = usb_dev;
     tx_xfer->bEndpointAddress = bulk_out_ep;
     tx_xfer->num_bytes = len;
-    tx_xfer->callback = NULL; // No callback needed for sending
+    tx_xfer->callback = usb_tx_callback; // No callback needed for sending
     usb_host_transfer_submit(tx_xfer);
 
     ESP_LOGI(TAG, "Sent %d bytes", len);
