@@ -3,5 +3,8 @@
         "interface/ftdi/esp32_devkitj_v1.cfg",
         "target/esp32s3.cfg"
     ],
-    "idf.port": "/dev/tty.wchusbserial58FC0521341"
+    "idf.port": "/dev/tty.wchusbserial58FC0521341",
+    "files.associations": {
+        "bitset": "c"
+    }
 }

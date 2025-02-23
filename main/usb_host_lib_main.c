@@ -19,6 +19,11 @@
 #include "esp_netif.h"
 #include "lwip/init.h"
 #include "lwip/ip_addr.h"
+#include "lwip/dhcp.h"
+
+#include "dhcpserver/dhcpserver_options.h"
+#include "lwip/esp_netif_net_stack.h"
+#include "esp_mac.h"
 
 #include "class_driver.h"
 
@@ -42,7 +47,7 @@ extern usb_device_handle_t usb_dev;
 
 QueueHandle_t app_event_queue = NULL;
 
-esp_netif_t *usb_netif = NULL;
+// esp_netif_t *usb_netif = NULL;
 
 void usb_transmit(uint8_t *packet, size_t len);
 
@@ -161,82 +166,82 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-typedef struct
-{
-    esp_eth_phy_t parent; // Base structure
-} usb_eth_phy_t;
+// typedef struct
+// {
+//     esp_eth_phy_t parent; // Base structure
+// } usb_eth_phy_t;
 
-// PHY Reset (No-op for USB)
-static esp_err_t usb_phy_reset(esp_eth_phy_t *phy)
-{
-    return ESP_OK;
-}
+// // PHY Reset (No-op for USB)
+// static esp_err_t usb_phy_reset(esp_eth_phy_t *phy)
+// {
+//     return ESP_OK;
+// }
 
-/** Event handler for IP_EVENT_ETH_GOT_IP */
-static void ip_event_handler(void *arg, esp_event_base_t event_base,
-                             int32_t event_id, void *event_data)
-{
-    ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-    const esp_netif_ip_info_t *ip_info = &event->ip_info;
+// /** Event handler for IP_EVENT_ETH_GOT_IP */
+// static void ip_event_handler(void *arg, esp_event_base_t event_base,
+//                              int32_t event_id, void *event_data)
+// {
+//     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+//     const esp_netif_ip_info_t *ip_info = &event->ip_info;
 
-    ESP_LOGI(TAG, "Ethernet Got IP Address");
-    ESP_LOGI(TAG, "~~~~~~~~~~~");
-    ESP_LOGI(TAG, "ETHIP:" IPSTR, IP2STR(&ip_info->ip));
-    ESP_LOGI(TAG, "ETHMASK:" IPSTR, IP2STR(&ip_info->netmask));
-    ESP_LOGI(TAG, "ETHGW:" IPSTR, IP2STR(&ip_info->gw));
-    ESP_LOGI(TAG, "~~~~~~~~~~~");
-}
+//     ESP_LOGI(TAG, "Ethernet Got IP Address");
+//     ESP_LOGI(TAG, "~~~~~~~~~~~");
+//     ESP_LOGI(TAG, "ETHIP:" IPSTR, IP2STR(&ip_info->ip));
+//     ESP_LOGI(TAG, "ETHMASK:" IPSTR, IP2STR(&ip_info->netmask));
+//     ESP_LOGI(TAG, "ETHGW:" IPSTR, IP2STR(&ip_info->gw));
+//     ESP_LOGI(TAG, "~~~~~~~~~~~");
+// }
 
-// PHY Power Control (No-op for USB)
-static esp_err_t usb_phy_pwrctl(esp_eth_phy_t *phy, bool enable)
-{
-    return ESP_OK;
-}
+// // PHY Power Control (No-op for USB)
+// static esp_err_t usb_phy_pwrctl(esp_eth_phy_t *phy, bool enable)
+// {
+//     return ESP_OK;
+// }
 
-// Get PHY Link Status (Return always UP)
-static esp_err_t usb_phy_get_link(esp_eth_phy_t *phy)
-{
-    return ESP_OK; // Always return success (Realtek USB PHY manages its link internally)
-}
+// // Get PHY Link Status (Return always UP)
+// static esp_err_t usb_phy_get_link(esp_eth_phy_t *phy)
+// {
+//     return ESP_OK; // Always return success (Realtek USB PHY manages its link internally)
+// }
 
-esp_err_t usb_phy_del(esp_eth_phy_t *phy)
-{
-    free(phy);
-    return ESP_OK;
-}
+// esp_err_t usb_phy_del(esp_eth_phy_t *phy)
+// {
+//     free(phy);
+//     return ESP_OK;
+// }
 
-// Create dummy PHY instance
-esp_eth_phy_t *esp_eth_phy_new_usb()
-{
-    usb_eth_phy_t *phy = calloc(1, sizeof(usb_eth_phy_t));
+// // Create dummy PHY instance
+// esp_eth_phy_t *esp_eth_phy_new_usb()
+// {
+//     usb_eth_phy_t *phy = calloc(1, sizeof(usb_eth_phy_t));
 
-    if (!phy)
-    {
-        ESP_LOGE(TAG, "Failed to allocate memory for USB PHY");
-        return NULL;
-    }
+//     if (!phy)
+//     {
+//         ESP_LOGE(TAG, "Failed to allocate memory for USB PHY");
+//         return NULL;
+//     }
 
-    phy->parent.reset = usb_phy_reset;
-    phy->parent.pwrctl = usb_phy_pwrctl;
-    phy->parent.get_link = usb_phy_get_link;
-    phy->parent.del = usb_phy_del;
-    return &(phy->parent);
-}
+//     phy->parent.reset = usb_phy_reset;
+//     phy->parent.pwrctl = usb_phy_pwrctl;
+//     phy->parent.get_link = usb_phy_get_link;
+//     phy->parent.del = usb_phy_del;
+//     return &(phy->parent);
+// }
 
 // Get MAC address from Realtek adapter
-static esp_err_t usb_eth_get_addr(esp_eth_mac_t *mac, uint8_t *addr)
-{
-    usb_eth_mac_t *usb_mac = __containerof(mac, usb_eth_mac_t, parent);
-    memcpy(addr, usb_mac->mac_addr, 6);
-    return ESP_OK;
-}
+// static esp_err_t usb_eth_get_addr(esp_eth_mac_t *mac, uint8_t *addr)
+// {
+//     usb_eth_mac_t *usb_mac = __containerof(mac, usb_eth_mac_t, parent);
+//     memcpy(addr, usb_mac->mac_addr, 6);
+//     return ESP_OK;
+// }
 
-// Start function (if needed for initialization)
-static esp_err_t usb_eth_start(esp_eth_mac_t *mac)
-{
-    // Configure USB communication (e.g., enable RX transfers)
-    return ESP_OK;
-}
+// // Start function (if needed for initialization)
+// static esp_err_t usb_eth_start(esp_eth_mac_t *mac)
+// {
+//     // Configure USB communication (e.g., enable RX transfers)
+//     return ESP_OK;
+// }
 
 // Receive packets from USB
 // static esp_err_t usb_eth_receive(esp_eth_mac_t *mac, uint8_t *buf, uint32_t *length)
@@ -250,16 +255,16 @@ static esp_err_t usb_eth_start(esp_eth_mac_t *mac)
 //     return ESP_OK;
 // }
 
-esp_err_t usb_eth_mac_del(esp_eth_mac_t *mac)
-{
-    free(mac);
-    return ESP_OK;
-}
+// esp_err_t usb_eth_mac_del(esp_eth_mac_t *mac)
+// {
+//     free(mac);
+//     return ESP_OK;
+// }
 
-esp_err_t usb_eth_mac_stop(esp_eth_mac_t *mac)
-{
-    return ESP_OK; // Stop USB Ethernet (if needed)
-}
+// esp_err_t usb_eth_mac_stop(esp_eth_mac_t *mac)
+// {
+//     return ESP_OK; // Stop USB Ethernet (if needed)
+// }
 
 // Define MAC driver
 // esp_eth_mac_t *esp_eth_mac_new_usb(usb_device_handle_t usb_dev)
@@ -280,134 +285,235 @@ esp_err_t usb_eth_mac_stop(esp_eth_mac_t *mac)
 //     return &(mac->parent);
 // }
 
-esp_err_t my_stack_input_function(void *arg, uint8_t *data, uint32_t length, void *ctx)
-{
-    // esp_eth_mac_t *mac = (esp_eth_mac_t *)arg; // Cast the 'arg' to the MAC type if needed
+// esp_err_t my_stack_input_function(void *arg, uint8_t *data, uint32_t length, void *ctx)
+// {
+//     // esp_eth_mac_t *mac = (esp_eth_mac_t *)arg; // Cast the 'arg' to the MAC type if needed
 
-    ESP_LOGI(TAG, "Received packet of length %ld", length);
-    // ethernet_input(buf, length); // Pass to lwIP or your IP stack
-    return ESP_OK;
-}
+//     ESP_LOGI(TAG, "Received packet of length %ld", length);
+//     // ethernet_input(buf, length); // Pass to lwIP or your IP stack
+//     return ESP_OK;
+// }
 
-esp_err_t usb_eth_transmit(void *h, void *buffer, size_t len)
-{
-    ESP_LOGI(TAG, "Transmitting packet");
-    // Send the Ethernet frame over USB
-    usb_eth_driver_t *driver = (usb_eth_driver_t *)h;
-    if (!driver->link_up)
-    {
-        ESP_LOGI(TAG, "Link is down, cannot send packet");
-        return ESP_ERR_INVALID_STATE;
-    }
+// esp_err_t usb_eth_transmit(void *h, void *buffer, size_t len)
+// {
+//     ESP_LOGI(TAG, "Transmitting packet");
+//     // Send the Ethernet frame over USB
+//     usb_eth_driver_t *driver = (usb_eth_driver_t *)h;
+//     if (!driver->link_up)
+//     {
+//         ESP_LOGI(TAG, "Link is down, cannot send packet");
+//         return ESP_ERR_INVALID_STATE;
+//     }
 
-    ESP_LOGI(TAG, "Sending packet of length %d", len);
-    // USB Send Implementation (TinyUSB)
-    usb_transmit(buffer, len);
-    // esp_err_t ret = usb_send_ethernet_packet(buffer, len); // Custom function
-    // return ret == ESP_OK ? ESP_OK : ESP_FAIL;
-    return ESP_OK;
-}
+//     ESP_LOGI(TAG, "Sending packet of length %d", len);
+//     // USB Send Implementation (TinyUSB)
+//     usb_transmit(buffer, len);
+//     // esp_err_t ret = usb_send_ethernet_packet(buffer, len); // Custom function
+//     // return ret == ESP_OK ? ESP_OK : ESP_FAIL;
+//     return ESP_OK;
+// }
 
 // Function to be called after attaching the netif
-static esp_err_t usb_eth_post_attach(esp_netif_t *netif, void *args)
+// static esp_err_t usb_eth_post_attach(esp_netif_t *netif, void *args)
+// {
+//     usb_eth_driver_t *driver = (usb_eth_driver_t *)args;
+//     if (!driver || !netif)
+//     {
+//         ESP_LOGE(TAG, "Invalid driver or netif in post_attach");
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     ESP_LOGI(TAG, "Post attach: Linking network interface with driver");
+
+//     // Store netif handle in driver
+//     // driver->netif = netif;
+
+//     // Optional: Set up additional event handlers
+//     esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+//     esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+
+//     return ESP_OK;
+// }
+
+esp_err_t usb_ncm_send(void *buffer, uint16_t len, void *buff_free_arg)
 {
-    usb_eth_driver_t *driver = (usb_eth_driver_t *)args;
-    if (!driver || !netif)
-    {
-        ESP_LOGE(TAG, "Invalid driver or netif in post_attach");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    ESP_LOGI(TAG, "Post attach: Linking network interface with driver");
-
-    // Store netif handle in driver
-    // driver->netif = netif;
-
-    // Optional: Set up additional event handlers
-    esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
-    esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
-
+    ESP_LOGI(TAG, "Sending packet of length %d", len);
+    usb_transmit(buffer, len);
     return ESP_OK;
 }
 
-void create_usb_netif()
+static void l2_free(void *h, void *buffer)
+{
+    free(buffer);
+}
+
+static esp_err_t netif_transmit(void *h, void *buffer, size_t len)
+{
+    ESP_LOGI(TAG, "Called netif_transmit with length %d", len);
+    // ESP_LOGI(TAG, "Buffer: %s", (char *)buffer);
+    if (usb_ncm_send(buffer, len, NULL) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to send buffer to USB!");
+    }
+    return ESP_OK;
+}
+
+esp_netif_t *s_netif = NULL;
+
+esp_err_t usb_ncm_init()
 {
     esp_netif_init();
     esp_event_loop_create_default();
 
-    usb_driver = calloc(1, sizeof(usb_eth_driver_t));
-    // usb_driver->base.post_attach = NULL; // Optional callback
-    usb_driver->link_up = true; // Assume link is up initially
+    esp_netif_ip_info_t ip_info;
+    IP4_ADDR(&ip_info.ip, 192, 168, 0, 200);
+    IP4_ADDR(&ip_info.gw, 192, 168, 0, 1);
+    IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
 
-    esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
-    usb_netif = esp_netif_new(&netif_config);
+    //     // esp_netif_dhcpc_stop(usb_netif);
+    // esp_netif_set_ip_info(usb_netif, &ip_info);
+    //     // ESP_LOGI(TAG, "Static IP set: 192.168.0.220");
+    //     // esp_netif_action_connected(usb_netif, NULL, 0, NULL);
+
+    // 1) Derive the base config (very similar to IDF's default WiFi AP with DHCP server)
+    esp_netif_inherent_config_t base_cfg = {
+        .flags = ESP_NETIF_FLAG_EVENT_IP_MODIFIED | ESP_NETIF_FLAG_AUTOUP | ESP_NETIF_DHCP_CLIENT,
+        .ip_info = &ip_info,
+        .get_ip_event = IP_EVENT_ETH_GOT_IP,
+        .lost_ip_event = IP_EVENT_ETH_LOST_IP,
+        .if_key = "usb_eth",
+        .if_desc = "usb ncm config device",
+        .route_prio = 10};
+
+    // 2) Use static config for driver's config pointing only to static transmit and free functions
+    esp_netif_driver_ifconfig_t driver_cfg = {
+        .handle = (void *)1,             // not using an instance, USB-NCM is a static singleton (must be != NULL)
+        .transmit = netif_transmit,      // point to static Tx function
+        .driver_free_rx_buffer = l2_free // point to Free Rx buffer function
+    };
+
+    // Config the esp-netif with:
+    //   1) inherent config (behavioural settings of an interface)
+    //   2) driver's config (connection to IO functions -- usb)
+    //   3) stack config (using lwip IO functions -- derive from eth)
+    esp_netif_config_t cfg = {
+        .base = &base_cfg,
+        .driver = &driver_cfg,
+        .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH, // USB-NCM is an Ethernet netif from lwip perspective, we already have IO definitions for that:
+    };
 
     // Get factory MAC and set it
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_ETH);
-    esp_netif_set_mac(usb_netif, mac);
-    memcpy(usb_driver->mac_addr, mac, 6);
     ESP_LOGI(TAG, "Set MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
-    esp_netif_driver_ifconfig_t driver_config = {
-        .handle = usb_driver,
-        .transmit = usb_eth_transmit,
-        .driver_free_rx_buffer = NULL, // Not needed for USB
-        // .post_attach = usb_eth_post_attach,
-    };
-
-    // esp_netif_set_driver_config(usb_netif, &driver_config);
-
-    if (esp_netif_set_driver_config(usb_netif, &driver_config) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to set driver config");
-    }
-    // Cast to esp_netif_iodriver_handle_t and attach
-    if (esp_netif_attach(usb_netif, (esp_netif_iodriver_handle)usb_driver) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to attach netif");
-    }
-
-    esp_netif_attach(usb_netif, usb_driver);
+    esp_netif_set_mac(s_netif, mac);
+    // memcpy(usb_driver->mac_addr, mac, 6);
 
     esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
     esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
 
-    // esp_netif_glue_t glue = driver_glue(usb_driver);
-
-    // esp_netif_attach(esp_netif, glue);
-
-    ESP_LOGI(TAG, "USB Ethernet netif created");
-    esp_err_t err = esp_netif_dhcpc_stop(usb_netif);
-    if (err == ESP_OK || err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED)
+    s_netif = esp_netif_new(&cfg);
+    if (s_netif == NULL)
     {
-        err = esp_netif_dhcpc_start(usb_netif);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to start DHCP: %s", esp_err_to_name(err));
-        }
-        else
-        {
-            ESP_LOGI(TAG, "DHCP client started successfully.");
-        }
+        return ESP_FAIL;
+    }
+    // esp_netif_set_mac(s_netif, mac);
+
+    // 4) Start DHCP client to obtain IP address dynamically
+    esp_err_t err = esp_netif_dhcpc_start(s_netif);
+    if (err == ESP_OK || err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)
+    {
+        ESP_LOGI(TAG, "DHCP client started successfully");
     }
     else
     {
-        ESP_LOGE(TAG, "Failed to stop DHCP: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to start DHCP client: %s", esp_err_to_name(err));
     }
-    ESP_LOGI(TAG, "DHCP client started");
 
-    // esp_netif_ip_info_t ip_info;
-    // IP4_ADDR(&ip_info.ip, 192, 168, 0, 220);
-    // IP4_ADDR(&ip_info.gw, 192, 168, 0, 1);
-    // IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
+    // start the interface manually (as the driver has been started already)
+    esp_netif_action_start(s_netif, 0, 0, 0);
+    esp_netif_action_connected(s_netif, NULL, 0, NULL);
 
-    // esp_netif_dhcpc_stop(usb_netif);
-    // esp_netif_set_ip_info(usb_netif, &ip_info);
-    // ESP_LOGI(TAG, "Static IP set: 192.168.0.220");
-    // esp_netif_action_connected(usb_netif, NULL, 0, NULL);
+    return ESP_OK;
 }
+
+// void create_usb_netif()
+// {
+//     esp_netif_init();
+//     esp_event_loop_create_default();
+
+//     usb_driver = calloc(1, sizeof(usb_eth_driver_t));
+//     // usb_driver->base.post_attach = NULL; // Optional callback
+//     usb_driver->link_up = true; // Assume link is up initially
+
+//     esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
+//     usb_netif = esp_netif_new(&netif_config);
+
+//     // Get factory MAC and set it
+//     uint8_t mac[6];
+//     esp_read_mac(mac, ESP_MAC_ETH);
+//     ESP_LOGI(TAG, "Set MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
+//              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+//     esp_netif_set_mac(usb_netif, mac);
+//     memcpy(usb_driver->mac_addr, mac, 6);
+
+//     esp_netif_driver_ifconfig_t driver_config = {
+//         .handle = usb_driver,
+//         .transmit = usb_eth_transmit,
+//         .driver_free_rx_buffer = NULL, // Not needed for USB
+//         // .post_attach = usb_eth_post_attach,
+//     };
+
+//     // esp_netif_set_driver_config(usb_netif, &driver_config);
+
+//     if (esp_netif_set_driver_config(usb_netif, &driver_config) != ESP_OK)
+//     {
+//         ESP_LOGE(TAG, "Failed to set driver config");
+//     }
+//     // Cast to esp_netif_iodriver_handle_t and attach
+//     if (esp_netif_attach(usb_netif, usb_driver) != ESP_OK)
+//     {
+//         ESP_LOGE(TAG, "Failed to attach netif");
+//     }
+
+//     esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+//     esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+
+//     // esp_netif_glue_t glue = driver_glue(usb_driver);
+
+//     // esp_netif_attach(esp_netif, glue);
+
+//     ESP_LOGI(TAG, "USB Ethernet netif created");
+//     esp_err_t err = esp_netif_dhcpc_stop(usb_netif);
+//     if (err == ESP_OK || err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED)
+//     {
+//         err = esp_netif_dhcpc_start(usb_netif);
+//         if (err != ESP_OK)
+//         {
+//             ESP_LOGE(TAG, "Failed to start DHCP: %s", esp_err_to_name(err));
+//         }
+//         else
+//         {
+//             ESP_LOGI(TAG, "DHCP client started successfully.");
+//         }
+//     }
+//     else
+//     {
+//         ESP_LOGE(TAG, "Failed to stop DHCP: %s", esp_err_to_name(err));
+//     }
+//     ESP_LOGI(TAG, "DHCP client started");
+
+//     // esp_netif_ip_info_t ip_info;
+//     // IP4_ADDR(&ip_info.ip, 192, 168, 0, 220);
+//     // IP4_ADDR(&ip_info.gw, 192, 168, 0, 1);
+//     // IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
+
+//     // esp_netif_dhcpc_stop(usb_netif);
+//     // esp_netif_set_ip_info(usb_netif, &ip_info);
+//     // ESP_LOGI(TAG, "Static IP set: 192.168.0.220");
+//     // esp_netif_action_connected(usb_netif, NULL, 0, NULL);
+// }
 
 // This function will be called when the USB Ethernet device is initialized
 // static void usb_ethernet_init()
@@ -577,10 +683,10 @@ void test_transmit()
     uint8_t test_packet[64] = {0}; // Dummy Ethernet frame
     memset(test_packet, 0xFF, 6);  // Broadcast MAC
 
-    if (usb_netif)
+    if (s_netif)
     {
         ESP_LOGI(TAG, "Manually sending test packet");
-        usb_eth_transmit(usb_netif, test_packet, sizeof(test_packet));
+        netif_transmit(s_netif, test_packet, sizeof(test_packet));
     }
     else
     {
@@ -590,15 +696,15 @@ void test_transmit()
 
 void set_link_status(bool link_up)
 {
-    usb_driver->link_up = link_up;
-    if (link_up)
-    {
-        esp_netif_action_connected(usb_netif, NULL, 0, NULL);
-    }
-    else
-    {
-        esp_netif_action_disconnected(usb_netif, NULL, 0, NULL);
-    }
+    // usb_driver->link_up = link_up;
+    // if (link_up)
+    // {
+    esp_netif_action_connected(s_netif, NULL, 0, NULL);
+    // }
+    // else
+    // {
+    //     esp_netif_action_disconnected(s_netif, NULL, 0, NULL);
+    // }
 }
 
 void app_main(void)
@@ -649,8 +755,11 @@ void app_main(void)
     vTaskDelay(1000);
 
     // usb_ethernet_init();
-    ESP_LOGI(TAG, "calling create_usb_netif");
-    create_usb_netif();
+    // ESP_LOGI(TAG, "calling create_usb_netif");
+    // create_usb_netif();
+
+    ESP_LOGI(TAG, "calling usb_ncm_init");
+    usb_ncm_init();
 
     esp_netif_t *test_netif = esp_netif_next(NULL);
     while (test_netif)
@@ -658,9 +767,12 @@ void app_main(void)
         ESP_LOGI("DEBUG", "Interface: %s", esp_netif_get_desc(test_netif));
         test_netif = esp_netif_next(test_netif);
     }
-    set_link_status(true);
+    // set_link_status(true);
 
     // test_transmit();
+
+    // struct netif *lwip_netif = esp_netif_get_netif_ptr(netif); // Get LwIP struct
+    // dhcp_renew(lwip_netif);                                    // Request renewal
 
     while (1)
     {

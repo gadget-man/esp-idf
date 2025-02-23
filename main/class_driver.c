@@ -19,7 +19,8 @@
 
 usb_device_handle_t usb_dev = NULL;
 
-extern esp_netif_t *usb_netif;
+// extern esp_netif_t *usb_netif;
+extern esp_netif_t *s_netif;
 
 typedef enum
 {
@@ -29,9 +30,9 @@ typedef enum
     ACTION_CLAIM_INTERFACE = (1 << 2),
     ACTION_PARSE_CONFIG_DESC = (1 << 3),
     ACTION_TRANSFER = (1 << 4),
-    // ACTION_GET_CONFIG_DESC = (1 << 3),
+    ACTION_GET_CONFIG_DESC = (1 << 5),
     // ACTION_GET_STR_DESC = (1 << 4),
-    ACTION_CLOSE_DEV = (1 << 5),
+    ACTION_CLOSE_DEV = (1 << 6),
 } action_t;
 
 #define DEV_MAX_COUNT 6
@@ -82,7 +83,7 @@ uint8_t bulk_out_ep = 0;
 uint8_t rx_buffer[PACKET_SIZE];
 
 static void usb_rx_callback(usb_transfer_t *rx_xfer);
-static void usb_tx_callback(usb_transfer_t *tx_xfer);
+// static void usb_tx_callback(usb_transfer_t *tx_xfer);
 
 static void client_event_cb(const usb_host_client_event_msg_t *event_msg, void *arg)
 {
@@ -181,7 +182,8 @@ static void action_get_dev_desc(usb_device_t *device_obj)
         ESP_LOGI(TAG, "Realtek RTL8152/RTL8153 detected");
         // ESP_LOGI(TAG, "Serial Number: %s", dev_info.str_desc_serial_num);
         usb_print_string_descriptor(dev_info.str_desc_serial_num);
-        device_obj->actions |= ACTION_CLAIM_INTERFACE;
+        device_obj->actions |= ACTION_GET_CONFIG_DESC;
+        // device_obj->actions |= ACTION_CLAIM_INTERFACE;
     }
     else
     {
@@ -281,10 +283,13 @@ static void action_transfer(usb_device_t *device_obj)
         memset(tx_xfer->data_buffer, 0xAA, PACKET_SIZE);
         tx_xfer->num_bytes = PACKET_SIZE;
         tx_xfer->device_handle = device_obj->dev_hdl;
-        tx_xfer->bEndpointAddress = bulk_out_ep;
-        tx_xfer->callback = usb_tx_callback;
+        tx_xfer->bEndpointAddress = bulk_in_ep;
+        tx_xfer->callback = usb_rx_callback;
         tx_xfer->context = (void *)&device_obj;
+
         usb_host_transfer_submit(tx_xfer);
+
+        ESP_LOGI(TAG, "USB RX transfer started");
     }
     else
     {
@@ -292,16 +297,17 @@ static void action_transfer(usb_device_t *device_obj)
         device_obj->actions |= ACTION_CLOSE_DEV;
     }
 }
-// static void action_get_config_desc(usb_device_t *device_obj)
-// {
-//     assert(device_obj->dev_hdl != NULL);
-//     ESP_LOGI(TAG, "Getting config descriptor");
-//     const usb_config_desc_t *config_desc;
-//     ESP_ERROR_CHECK(usb_host_get_active_config_descriptor(device_obj->dev_hdl, &config_desc));
-//     // usb_print_config_descriptor(config_desc, NULL);
-//     // Get the device's string descriptors next
-//     device_obj->actions |= ACTION_GET_STR_DESC;
-// }
+static void action_get_config_desc(usb_device_t *device_obj)
+{
+    assert(device_obj->dev_hdl != NULL);
+    ESP_LOGI(TAG, "Getting config descriptor");
+    const usb_config_desc_t *config_desc;
+    ESP_ERROR_CHECK(usb_host_get_active_config_descriptor(device_obj->dev_hdl, &config_desc));
+    usb_print_config_descriptor(config_desc, NULL);
+    // Get the device's string descriptors next
+    // device_obj->actions |= ACTION_GET_STR_DESC;
+    device_obj->actions |= ACTION_CLAIM_INTERFACE;
+}
 
 // static void action_get_str_desc(usb_device_t *device_obj)
 // {
@@ -340,29 +346,31 @@ static void action_close_dev(usb_device_t *device_obj)
 
 static void usb_rx_callback(usb_transfer_t *transfer)
 {
-    usb_eth_mac_t *mac = (usb_eth_mac_t *)transfer->context;
+    // usb_eth_mac_t *mac = (usb_eth_mac_t *)transfer->context;
 
-    ESP_LOGI("USB_ETH", "Received packet: %d bytes", transfer->actual_num_bytes);
+    ESP_LOGI(TAG, "Received usb_rx_callback");
 
-    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0)
-    {
-        ESP_LOGI("USB_ETH", "Received packet: %d bytes", transfer->actual_num_bytes);
+    if (!cdc)
 
-        esp_netif_receive(usb_netif, transfer->data_buffer, transfer->actual_num_bytes, NULL);
+        if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0)
+        {
+            ESP_LOGI("USB_ETH", "Received packet: %d bytes", transfer->actual_num_bytes);
 
-        // if (mac->parent.stack_input)
-        // {
-        //     mac->parent.stack_input(&mac->parent, transfer->data_buffer, transfer->actual_num_bytes);
-        // }
-        // else
-        // {
-        //     ESP_LOGE(TAG, "MAC mediator is not set, cannot pass data to Ethernet stack");
-        // }
-    }
-    else
-    {
-        ESP_LOGW("USB_ETH", "USB RX failed or no data: %d", transfer->status);
-    }
+            esp_netif_receive(s_netif, transfer->data_buffer, transfer->actual_num_bytes, NULL);
+
+            // if (mac->parent.stack_input)
+            // {
+            //     mac->parent.stack_input(&mac->parent, transfer->data_buffer, transfer->actual_num_bytes);
+            // }
+            // else
+            // {
+            //     ESP_LOGE(TAG, "MAC mediator is not set, cannot pass data to Ethernet stack");
+            // }
+        }
+        else
+        {
+            ESP_LOGW("USB_ETH", "USB RX failed or no data: %d", transfer->status);
+        }
 
     // Re-submit RX transfer for next packet
     transfer->num_bytes = PACKET_SIZE;
@@ -427,6 +435,7 @@ static void usb_tx_callback(usb_transfer_t *tx_xfer)
 
 esp_err_t usb_eth_receive(esp_eth_mac_t *mac, uint8_t *buf, uint32_t *length)
 {
+    ESP_LOGI(TAG, "usb_eth_receive called");
     usb_eth_mac_t *usb_mac = __containerof(mac, usb_eth_mac_t, parent);
 
     if (!usb_dev || !bulk_in_ep)
@@ -434,6 +443,7 @@ esp_err_t usb_eth_receive(esp_eth_mac_t *mac, uint8_t *buf, uint32_t *length)
         ESP_LOGE("USB_ETH", "USB device not initialized or bulk IN endpoint missing");
         return ESP_FAIL;
     }
+    // uint8_t buf[PACKET_SIZE];
 
     // usb_transfer_t *rx_xfer = NULL;
     if (usb_host_transfer_alloc(PACKET_SIZE, 0, &rx_xfer) != ESP_OK)
@@ -447,8 +457,25 @@ esp_err_t usb_eth_receive(esp_eth_mac_t *mac, uint8_t *buf, uint32_t *length)
     rx_xfer->bEndpointAddress = bulk_in_ep;
     rx_xfer->callback = usb_rx_callback; // Callback for RX completion
     rx_xfer->context = usb_mac;
+    // rx_xfer->data_buffer = buf;
+    rx_xfer->timeout_ms = 1000;
 
-    return usb_host_transfer_submit(rx_xfer);
+    ESP_LOGI(TAG, "Received packet over USB...");
+
+    ESP_ERROR_CHECK(usb_host_transfer_submit(rx_xfer));
+
+    if (rx_xfer->status == USB_TRANSFER_STATUS_COMPLETED && rx_xfer->actual_num_bytes > 0)
+    {
+        ESP_LOGI(TAG, "Received packet: %d bytes", rx_xfer->actual_num_bytes);
+        // memcpy(buf, rx_xfer->data_buffer, rx_xfer->actual_num_bytes);
+        // *length = rx_xfer->actual_num_bytes;
+        esp_netif_receive(s_netif, buf, rx_xfer->actual_num_bytes, NULL);
+    }
+    else
+    {
+        ESP_LOGW("USB_ETH", "USB RX failed or no data: %d", rx_xfer->status);
+    }
+    return ESP_OK;
 }
 
 // // // USB Send Packet Function
@@ -473,6 +500,7 @@ void usb_transmit(uint8_t *packet, size_t len)
     usb_host_transfer_submit(tx_xfer);
 
     ESP_LOGI(TAG, "Sent %d bytes", len);
+    usb_host_transfer_free(tx_xfer);
 }
 
 static void class_driver_device_handle(usb_device_t *device_obj)
@@ -506,10 +534,10 @@ static void class_driver_device_handle(usb_device_t *device_obj)
         {
             action_transfer(device_obj);
         }
-        // if (actions & ACTION_GET_CONFIG_DESC)
-        // {
-        //     action_get_config_desc(device_obj);
-        // }
+        if (actions & ACTION_GET_CONFIG_DESC)
+        {
+            action_get_config_desc(device_obj);
+        }
         // if (actions & ACTION_GET_STR_DESC)
         // {
         //     action_get_str_desc(device_obj);
